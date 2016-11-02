@@ -8,6 +8,13 @@ import com.amazon.speech.speechlet.SpeechletResponse;
 import com.amazonaws.services.dynamodbv2.xspec.S;
 import com.squad.voice.model.base.Conversation;
 import java.util.Map;
+import com.squad.voice.skill.Event;
+
+/*
+ * 
+ * FIX THE NewAskResponse parameters.
+ * 
+ */
 
 
 public class GMCConversation extends Conversation {
@@ -18,11 +25,21 @@ public class GMCConversation extends Conversation {
 	private final static String INTENT_SPECIFIC_EVENT_DETAILS = "SpecificEventDetailsIntent";
 	private final static String INTENT_MORE_EVENTS = "MoreIntent";
 	private final static String INTENT_SPECIFIC_EVENT_PURCHASE = "SpecificEventPurchaseIntent";
+	private final static String INTENT_LAST_EVENT_PURCHASE = "KnownEventTicketsIntent";
+	private final static String INTENT_HOW_MUCH = "HowMuchIntent";
+	private final static String INTENT_WHAT_DATE = "WhatDateIntent";
+	private final static String INTENT_WHAT_TIME = "WhatTimeIntent";
+
+	private final static String INTENT_KNOWN_EVENT_HOW_MUCH = "KnownEventHowMuchIntent";
+	private final static String INTENT_KNOWN_EVENT_WHAT_DATE = "KnownEventWhatDateIntent";
+	private final static String INTENT_KNOWN_EVENT_WHAT_TIME = "KnownEventWhatTimeIntent";
+
 	private final static String INTENT_YES = "AMAZON.YesIntent";
 	private final static String INTENT_NO = "AMAZON.NoIntent";
 	private final static String INTENT_HELP = "AMAZON.HelpIntent";
 	private final static String INTENT_STOP = "AMAZON.StopIntent";
 	private final static String INTENT_CANCEL = "AMAZON.CancelIntent";
+	private final static String INTENT_END_CONVERSATION = "EndConvoIntent";
 
 
 	// Slots
@@ -40,10 +57,13 @@ public class GMCConversation extends Conversation {
 	// Im still not sure what this does, I think it prevents the session from terminating
 	private final static String SESSION_EVENT_STATE = "eventState";
 
+	//Parse the RSS feed into the array of events
+	public Event[] events = new Event().parseRSSFeed();
 
+	public int lastRead = 0;
+	
 	public GMCConversation() {
 		super();
-
 		//Add custom intent names for dispatcher use
 		//**I don't have a list of our functions made @ last meeting, is anything missing?**
 		supportedIntentNames.add(INTENT_START);
@@ -52,6 +72,17 @@ public class GMCConversation extends Conversation {
 		supportedIntentNames.add(INTENT_SPECIFIC_EVENT_DETAILS);
 		supportedIntentNames.add(INTENT_MORE_EVENTS);
 		supportedIntentNames.add(INTENT_SPECIFIC_EVENT_PURCHASE);
+		supportedIntentNames.add(INTENT_LAST_EVENT_PURCHASE);
+		supportedIntentNames.add(INTENT_END_CONVERSATION);
+
+
+		supportedIntentNames.add(INTENT_HOW_MUCH);
+		supportedIntentNames.add(INTENT_WHAT_DATE);
+		supportedIntentNames.add(INTENT_WHAT_TIME);
+		supportedIntentNames.add(INTENT_KNOWN_EVENT_HOW_MUCH);
+		supportedIntentNames.add(INTENT_KNOWN_EVENT_WHAT_DATE);
+		supportedIntentNames.add(INTENT_KNOWN_EVENT_WHAT_TIME);
+
 		supportedIntentNames.add(INTENT_YES);
 		supportedIntentNames.add(INTENT_NO);
 		supportedIntentNames.add(INTENT_HELP);
@@ -78,15 +109,38 @@ public class GMCConversation extends Conversation {
 		else if (INTENT_DATE_GMC.equals(intentName)) {
 			response = handleDateSpecifiedIntent(intentReq, session);
 		}
-		else if (INTENT_MORE_EVENTS.equals(intentName)) {
-			response = handleMoreEventsIntent(intentReq, session);
-		}
 		else if (INTENT_SPECIFIC_EVENT_DETAILS.equals(intentName)) {
 			response = handleSpecificEventDetailsIntent(intentReq, session);
 		}
 		else if (INTENT_SPECIFIC_EVENT_PURCHASE.equals(intentName)) {
 			response = handleSpecificEventPurchaseIntent(intentReq, session);
 		}
+		else if (INTENT_LAST_EVENT_PURCHASE.equals(intentName)){
+			response = handleLastEventPurchaseIntent(intentReq, session);
+		}
+		else if (INTENT_WHAT_TIME.equals(intentName)){
+			response = handleWhatTimeIntent(intentReq, session);
+
+		}
+		else if (INTENT_WHAT_DATE.equals(intentName)){
+			response = handleWhatDateIntent(intentReq, session);
+		}
+		else if (INTENT_HOW_MUCH.equals(intentName)){
+			response = handleHowMuchIntent(intentReq, session);
+		}
+		else if (INTENT_KNOWN_EVENT_WHAT_TIME.equals(intentName)){
+			response = handleKnownEventWhatTimeIntent(intentReq, session);
+
+		}
+		else if (INTENT_KNOWN_EVENT_WHAT_DATE.equals(intentName)){
+			response = handleKnownEventWhatDateIntent(intentReq, session);
+		}
+		else if (INTENT_KNOWN_EVENT_HOW_MUCH.equals(intentName)){
+			response = handleKnownEventHowMuchIntent(intentReq, session);
+		}
+		else if (INTENT_END_CONVERSATION.equals( intentName )){
+			response = handleEndConvoIntent(intentReq, session);
+}
 		else {
 			response = newTellResponse("Sorry, I didn't get that.", false);
 		}
@@ -94,12 +148,21 @@ public class GMCConversation extends Conversation {
 		return response;
 	}
 
+	private SpeechletResponse handleEndConvoIntent(IntentRequest intentReq, Session session) {
+		SpeechletResponse response = newTellResponse("Alright, let me know if you need anything else.", false);
+		session.setAttribute(SESSION_EVENT_STATE, STATE_WAITING_FOR_EVENT_REQ);
+
+		return response;
+
+
+	}
+
 	//Pre: Takes in generic call to GMC skill
 	//Post: Prompts user to ask about upcoming events
 	private SpeechletResponse handleGMCIntentStart(IntentRequest intentReq, Session session) {
-		SpeechletResponse response = newAskResponse("Hello, I am GMC event helper, I can provide information about events" +
-				"happening at the Green music center, try asking me about upcoming events", false, "You can also specify" +
-				" ask for a list of events occurring on a specific date", false);
+		SpeechletResponse response = newAskResponse("Hello, I am GMC event helper, I can provide information about events " +
+				"happening at the Green music center, try asking me about upcoming events", false, "You can also" +
+				" ask for events occurring on a specific date", false);
 		session.setAttribute(SESSION_EVENT_STATE, STATE_WAITING_FOR_EVENT_REQ);
 
 		return response;
@@ -110,9 +173,10 @@ public class GMCConversation extends Conversation {
 	//Pre: Takes a generic request for upcoming events
 	//Post: Lists three most recent events, prompts user to ask about a specific event or ask for more events
 	private SpeechletResponse handleGenericUpcomingIntent(IntentRequest intentReq, Session session) {
-		SpeechletResponse response = newAskResponse("The next three events are a comedy show: funny or die jokes for votes, on" +
-				" October 6th; A performance: Philharmonia Baroque Orchestra, on October 15th; and a talk by " +
-				"Adam Savage, on October 17th", false, "You can ask about a specific event or events for other dates.", false);
+		
+		SpeechletResponse response = newAskResponse("The next three events are: " + events[lastRead].getTitle() + 
+				": " + events[lastRead += 1].getTitle() + ": and " + events[lastRead += 1].getTitle() + "; You can ask about a specific event, or ask to hear about more events. " ,false, "Try asking for more events.",false);
+		lastRead++;
 		session.setAttribute(SESSION_EVENT_STATE, STATE_GIVEN_EVENTS);
 		return response;
 
@@ -123,9 +187,44 @@ public class GMCConversation extends Conversation {
 	//Post: Lists events in specified range, or explains there are no events in range and presents user
 	//	    with three events closest to desired date.
 	private SpeechletResponse handleDateSpecifiedIntent(IntentRequest intentReq, Session session) {
-		SpeechletResponse response = newAskResponse("The next three events for that range are a comedy show: funny or die jokes for votes, on" +
-				" October 6th; A performance: Philharmonia Baroque Orchestra, on October 15th; and a talk by " +
-				"Adam Savage, on October 17th", false, "You can ask about a specific event or events for other dates.", false);
+		Intent intent = intentReq.getIntent();
+		Map<String, Slot> slots = intent.getSlots();
+		Slot dateSlot = slots.get("dateSpecified");
+		String date = dateSlot.getValue();
+		SpeechletResponse response = null;
+		boolean eventOnDate = false; 
+		int eventDateNum = 0;
+		//String scrubbedAlexaDate = date.replace("-", "");
+		//int alexaDate = Integer.parseInt(scrubbedAlexaDate);
+		//int prev = 0;
+		//int next = 0;
+		for(int i = 0; i < events[0].size(); i++){
+				if((events[i].getDate()).contains(date) ){
+					eventOnDate = true;
+					eventDateNum = i;
+					break; 
+				}
+				//I'd like to do something like this, but the events[i].date would need to be in an array.
+				/*String scrubbedEventDate = events[i].getDate().replace("-", "");
+				int lastRead = eventDateNum; 
+				int eventsDate = Integer.parseInt(scrubbedEventDate);
+			
+				if(eventsDate > alexaDate){
+						prev = i - 1; 
+						next = i;
+						break;
+					}
+				*/
+
+		}
+		int temp = eventDateNum + 1;
+		if(eventOnDate){
+			response = newAskResponse("There is an event on that date! " + events[eventDateNum].getTitle(), false, "You can ask to reseve tickets for this event, or for more details", false);
+		}
+		else{
+			response = newAskResponse("Sorry, there are no events on that date.", false, "", false);
+		}
+
 		session.setAttribute(SESSION_EVENT_STATE, STATE_GIVEN_EVENTS);
 
 		return response;
@@ -143,154 +242,25 @@ public class GMCConversation extends Conversation {
 		SpeechletResponse response = null;
 
 		// This function is going to have to use the slot input and search for it in our database
-		// but for now its hardcoded
-
-		switch (event){
-			case "funny or die jokes for votes":
-				response = newAskResponse("A free comedy show and voter registration opportunity combining the powers of Next" +
-						" Gen and Funny or Die. This event starts at 7:00 and is free.", false, "Do you need me to repeat that?", false);
-				break;
-			case "funny or die":
-				response = newAskResponse("A free comedy show and voter registration opportunity combining the powers of Next" +
-						" Gen and Funny or Die. This event starts at 7:00 and is free.", false, "Do you need me to repeat that?", false);
-				break;
-			case "the comedy show":
-				response = newAskResponse("A free comedy show and voter registration opportunity combining the powers of Next" +
-						" Gen and Funny or Die. This event starts at 7:00 and is free.", false, "Do you need me to repeat that?", false);
-				break;
-			case "jokes for votes":
-				response = newAskResponse("A free comedy show and voter registration opportunity combining the powers of Next" +
-						" Gen and Funny or Die. This event starts at 7:00 and is free.", false, "Do you need me to repeat that?", false);
-				break;
-			case "philharmonia baroque orchestra":
-				response = newAskResponse("The Philharmonia Baroque Orchestra, directed by Nicholas McGegan brings audiences " +
-						"back in time, performing on the period instruments for which this music was originally written. Joining" +
-						" them for this all-Beethoven program is Robert Levin on fortepiano. It starts at 7:30 and costs 35" +
-						" dollars", false, "Do you need me to repeat that?", false);
-				break;
-			case "the orchestra":
-				response = newAskResponse("The Philharmonia Baroque Orchestra, directed by Nicholas McGegan brings audiences " +
-						"back in time, performing on the period instruments for which this music was originally written. Joining" +
-						" them for this all-Beethoven program is Robert Levin on fortepiano. It starts at 7:30 and costs 35" +
-						" dollars", false, "Do you need me to repeat that?", false);
-				break;
-			case "Adam savage":
-				response = newAskResponse("Mythbusters' 160-and-counting episode hours have tackled over 750 myths and performed " +
-						"nearly 2,500 experiments. Adam and Jamie travel the country to corporate events, museums, and colleges," +
-						" for groups as small as 20 and as large as 20,000, telling tales of experiments, explosions and hijinks. " +
-						"It starts at 7:30 and costs 35 dollars.", false, "Do you need me to repeat that?", false);
-				break;
-			case "Adam":
-				response = newAskResponse("Mythbusters' 160-and-counting episode hours have tackled over 750 myths and performed " +
-						"nearly 2,500 experiments. Adam and Jamie travel the country to corporate events, museums, and colleges," +
-						" for groups as small as 20 and as large as 20,000, telling tales of experiments, explosions and hijinks. " +
-						"It starts at 7:30 and costs 35 dollars.", false, "Do you need me to repeat that?", false);
-				break;
-			case "savage":
-				response = newAskResponse("Mythbusters' 160-and-counting episode hours have tackled over 750 myths and performed " +
-						"nearly 2,500 experiments. Adam and Jamie travel the country to corporate events, museums, and colleges," +
-						" for groups as small as 20 and as large as 20,000, telling tales of experiments, explosions and hijinks. " +
-						"It starts at 7:30 and costs 35 dollars.", false, "Do you need me to repeat that?", false);
-				break;
-			case "Mr. savage":
-				response = newAskResponse("Mythbusters' 160-and-counting episode hours have tackled over 750 myths and performed " +
-						"nearly 2,500 experiments. Adam and Jamie travel the country to corporate events, museums, and colleges," +
-						" for groups as small as 20 and as large as 20,000, telling tales of experiments, explosions and hijinks. " +
-						"It starts at 7:30 and costs 35 dollars.", false, "Do you need me to repeat that?", false);
-				break;
-			case "Sonoma state university sustainability day":
-				response = newAskResponse("Over the past three decades, Bill McKibben has shaped public perception—and public " +
-						"action—on climate change, alternative energy, and the need for localized economies. An environmental" +
-						" activist, bestselling author, and the planet's best green journalist, McKibben is the founder of " +
-						"350.org, the massive grassroots climate change initiative. This event starts at 7:30 and costs 20" +
-						" dollars.", false, "Do you need me to repeat that?", false);
-				break;
-			case "sustainability day":
-				response = newAskResponse("Over the past three decades, Bill McKibben has shaped public perception—and public " +
-						"action—on climate change, alternative energy, and the need for localized economies. An environmental" +
-						" activist, bestselling author, and the planet's best green journalist, McKibben is the founder of " +
-						"350.org, the massive grassroots climate change initiative. This event starts at 7:30 and costs 20" +
-						" dollars.", false, "Do you need me to repeat that?", false);
-				break;
-			case "ssu sustainability day":
-				response = newAskResponse("Over the past three decades, Bill McKibben has shaped public perception—and public " +
-						"action—on climate change, alternative energy, and the need for localized economies. An environmental" +
-						" activist, bestselling author, and the planet's best green journalist, McKibben is the founder of " +
-						"350.org, the massive grassroots climate change initiative. This event starts at 7:30 and costs 20" +
-						" dollars.", false, "Do you need me to repeat that?", false);
-				break;
-			case "Itzhak Perlman and Rohan de Silva":
-				response = newAskResponse("Undeniably the reigning virtuoso of the violin, Itzhak Perlman enjoys superstar" +
-						" status rarely afforded a classical musician. Beloved for his charm and humanity as well as his " +
-						"talent, he is treasured by audiences throughout the world who respond not only to his remarkable " +
-						"artistry but also to his irrepressible joy for making music. It starts at 7:30 and costs 50 " +
-						"dollars.", false, "Do you need me to repeat that?", false);
-				break;
-			case "Itzhak Perlman":
-				response = newAskResponse("Undeniably the reigning virtuoso of the violin, Itzhak Perlman enjoys superstar" +
-						" status rarely afforded a classical musician. Beloved for his charm and humanity as well as his " +
-						"talent, he is treasured by audiences throughout the world who respond not only to his remarkable " +
-						"artistry but also to his irrepressible joy for making music. It starts at 7:30 and costs 50 " +
-						"dollars.", false, "Do you need me to repeat that?", false);
-				break;
-			case "Rohan de Silva":
-				response = newAskResponse("Undeniably the reigning virtuoso of the violin, Itzhak Perlman enjoys superstar" +
-						" status rarely afforded a classical musician. Beloved for his charm and humanity as well as his " +
-						"talent, he is treasured by audiences throughout the world who respond not only to his remarkable " +
-						"artistry but also to his irrepressible joy for making music. It starts at 7:30 and costs 50 " +
-						"dollars.", false, "Do you need me to repeat that?", false);
-				break;
-			case "Denis matsuev":
-				response = newAskResponse("Winner of the prestigious Tchaikovsky Competition, Denis Matsuev is “a virtuoso " +
-						"in the grandest of Russian pianistic tradition,” and one of the most highly-regarded pianists of his" +
-						" generation. His captivating live performances showcase his unique ability to move seamlessly between" +
-						" thundering ferocity and graceful nuance. This event costs 35 dollars and starts at 7:30", false, "Do" +
-						" you need me to repeat that?", false);
-				break;
-			case "matsuev":
-				response = newAskResponse("Winner of the prestigious Tchaikovsky Competition, Denis Matsuev is “a virtuoso " +
-						"in the grandest of Russian pianistic tradition,” and one of the most highly-regarded pianists of his" +
-						" generation. His captivating live performances showcase his unique ability to move seamlessly between" +
-						" thundering ferocity and graceful nuance. This event costs 35 dollars and starts at 7:30", false, "Do" +
-						" you need me to repeat that?", false);
-				break;
-			case "Denis":
-				response = newAskResponse("Winner of the prestigious Tchaikovsky Competition, Denis Matsuev is “a virtuoso " +
-						"in the grandest of Russian pianistic tradition,” and one of the most highly-regarded pianists of his" +
-						" generation. His captivating live performances showcase his unique ability to move seamlessly between" +
-						" thundering ferocity and graceful nuance. This event costs 35 dollars and starts at 7:30", false, "Do" +
-						" you need me to repeat that?", false);
-				break;
-			case "Mr. matsuev":
-				response = newAskResponse("Winner of the prestigious Tchaikovsky Competition, Denis Matsuev is “a virtuoso " +
-						"in the grandest of Russian pianistic tradition,” and one of the most highly-regarded pianists of his" +
-						" generation. His captivating live performances showcase his unique ability to move seamlessly between" +
-						" thundering ferocity and graceful nuance. This event costs 35 dollars and starts at 7:30", false, "Do" +
-						" you need me to repeat that?", false);
-				break;
-			default:
-				response = newAskResponse("I didn't get that", false, "please try again", false);
-				break;
+		// but for now its hardcoded		
+		boolean eventMatch = false; 
+		int eventMatchNum = 0;
+		for(int i = 0; i < events[0].size(); i++){
+				if(((events[i].getTitle()).toLowerCase()).contains(event.toLowerCase()) ){
+					eventMatch = true;
+					eventMatchNum = i;
+					lastRead = eventMatchNum; 
+					break; 
+				}
 		}
-
-		session.setAttribute(SESSION_EVENT_STATE, STATE_GIVEN_DETAILS);
-		return response;
-
-	}
-
-	private SpeechletResponse handleMoreEventsIntent(IntentRequest intentReq, Session session) {
-		SpeechletResponse response = null;
-		if(session.getAttribute(SESSION_EVENT_STATE) != null
-				&& STATE_GIVEN_EVENTS.compareTo((Integer)session.getAttribute(SESSION_EVENT_STATE)) == 0) {
-			response = newAskResponse("The next three events are a presentation: Sonoma State university sustainability" +
-					" day, on October 18th; A performance: Itzhak Perlman and Rohan De Selva, on October 20th; and a Performance:" +
-					" Denis Matsuev, on October 22th", false, "You can ask about a specific event or events for other dates.", false);
-			session.setAttribute(SESSION_EVENT_STATE, STATE_GIVEN_EVENTS);
-		}
-		else {
-			response = newTellResponse("You have to ask for a list of events before I can tell you more.", false);
+		if(eventMatch){
+			response = newAskResponse(events[eventMatchNum].getDesc(), false, "You can ask for the time or date of this event, ask to buy tickets, or ask for more events.", false);
+			session.setAttribute(SESSION_EVENT_STATE, STATE_GIVEN_DETAILS);
+		}else{
+			response = newAskResponse("Sorry, I didn't get that.", false, "", false);
 		}
 		return response;
+
 
 	}
 
@@ -300,11 +270,150 @@ public class GMCConversation extends Conversation {
 	//		ticket and sends the ticket to user's amazon email}**How do we tie this to amazon acct/email?**
 	// 		else{prompt user for their email and sends link to purchase tickets to aforementioned email.
 	//		**We may want to fork this call to give options for ticketing levels, ask about #of tickets to purchase**
-	private SpeechletResponse handleSpecificEventPurchaseIntent(IntentRequest intentReq, Session session) {
-		SpeechletResponse response = newAskResponse("Yes, a confirmation email has been sent to your provided address.",
-				false, "You can ask about a specific event or events for other dates.", false);
-		session.setAttribute(SESSION_EVENT_STATE, STATE_MADE_RESERV);
-		return response;
+		private SpeechletResponse handleSpecificEventPurchaseIntent(IntentRequest intentReq, Session session) {
+			Intent intent = intentReq.getIntent();
+			Map<String, Slot> slots = intent.getSlots();
+			Slot eventNameSlot = slots.get("specificEvent");
+			String event = eventNameSlot.getValue();
+			SpeechletResponse response = null;
+	
+			// This function is going to have to use the slot input and search for it in our database
+			boolean eventMatch = false; 
+			int eventMatchNum = 0;
+			for(int i = 0; i < events[0].size(); i++){
+					if(((events[i].getTitle()).toLowerCase()).contains(event.toLowerCase()) ){
+						eventMatch = true;
+						eventMatchNum = i;
+						int lastRead = eventMatchNum; 
+						break; 
+					}
+			}
+			if(eventMatch){
+				response = newTellResponse(events[eventMatchNum].getTitle() + " costs: " + events[eventMatchNum].getPrice() + "; I have sent a card to your alexa app with a link to purchase.", false);
+				session.setAttribute(SESSION_EVENT_STATE, STATE_GIVEN_DETAILS);
+			}else{
+				response = newAskResponse("Sorry, I didn't get that.", false, "", false);
+			}
+			return response;
 
 	}
+	
+
+	private SpeechletResponse handleLastEventPurchaseIntent(IntentRequest intentReq, Session session) {
+			SpeechletResponse response = null;
+			response = newTellResponse(events[lastRead].getTitle() + " costs: " + events[lastRead].getPrice() + "; " + events[lastRead].getSite() + "; I have sent a card to your alexa app with a link to purchase.",false);
+			session.setAttribute(SESSION_EVENT_STATE, STATE_GIVEN_DETAILS);
+			return response;
+	}
+
+
+
+
+private SpeechletResponse handleWhatDateIntent(IntentRequest intentReq, Session session) {
+		Intent intent = intentReq.getIntent();
+		Map<String, Slot> slots = intent.getSlots();
+		Slot eventNameSlot = slots.get("specificEvent");
+		String event = eventNameSlot.getValue();
+		SpeechletResponse response = null;
+
+		// This function is going to have to use the slot input and search for it in our database
+		// but for now its hardcoded		
+		boolean eventMatch = false; 
+		int eventMatchNum = 0;
+		for(int i = 0; i < events[0].size(); i++){
+				if(((events[i].getTitle()).toLowerCase()).contains(event.toLowerCase()) ){
+					eventMatch = true;
+					eventMatchNum = i;
+					lastRead = eventMatchNum; 
+					break; 
+				}
+		}
+		if(eventMatch){
+			response = newAskResponse(events[eventMatchNum].getTitle() + " is on: " + events[eventMatchNum].getTime(), false, "You can ask to buy tickets if you would like.", false);
+			session.setAttribute(SESSION_EVENT_STATE, STATE_GIVEN_DETAILS);
+		}else{
+			response = newAskResponse("Sorry, I didn't get that.", false, "Please rephrase your question.", false);
+		}
+		return response;
+
+
+	}
+
+	private SpeechletResponse handleWhatTimeIntent(IntentRequest intentReq, Session session) {
+		Intent intent = intentReq.getIntent();
+		Map<String, Slot> slots = intent.getSlots();
+		Slot eventNameSlot = slots.get("specificEvent");
+		String event = eventNameSlot.getValue();
+		SpeechletResponse response = null;
+
+		// This function is going to have to use the slot input and search for it in our database
+		// but for now its hardcoded		
+		boolean eventMatch = false; 
+		int eventMatchNum = 0;
+		for(int i = 0; i < events[0].size(); i++){
+				if(((events[i].getTitle()).toLowerCase()).contains(event.toLowerCase()) ){
+					eventMatch = true;
+					eventMatchNum = i;
+					lastRead = eventMatchNum; 
+					break; 
+				}
+		}
+		if(eventMatch){
+			response = newAskResponse(events[eventMatchNum].getTitle() + " is on: " + events[eventMatchNum].getTime(), false, "You can ask to buy tickets if you would like.", false);
+			session.setAttribute(SESSION_EVENT_STATE, STATE_GIVEN_DETAILS);
+		}else{
+			response = newAskResponse("Sorry, I didn't get that.", false, "Please rephrase your question", false);
+		}
+		return response;
+
+
+	}
+
+	private SpeechletResponse handleHowMuchIntent(IntentRequest intentReq, Session session) {
+		Intent intent = intentReq.getIntent();
+		Map<String, Slot> slots = intent.getSlots();
+		Slot eventNameSlot = slots.get("specificEvent");
+		String event = eventNameSlot.getValue();
+		SpeechletResponse response = null;
+
+		// This function is going to have to use the slot input and search for it in our database
+		// but for now its hardcoded		
+		boolean eventMatch = false; 
+		int eventMatchNum = 0;
+		for(int i = 0; i < events[0].size(); i++){
+				if(((events[i].getTitle()).toLowerCase()).contains(event.toLowerCase()) ){
+					eventMatch = true;
+					eventMatchNum = i;
+					lastRead = eventMatchNum; 
+					break; 
+				}
+		}
+		if(eventMatch){
+			response = newAskResponse(events[eventMatchNum].getTitle() + " costs: " + events[eventMatchNum].getPrice() + " and up.", false, "You can ask to buy tickets if you would like.", false);
+			session.setAttribute(SESSION_EVENT_STATE, STATE_GIVEN_DETAILS);
+		}else{
+			response = newAskResponse("Sorry, I didn't get that.", false, "Please rephrase your question.", false);
+		}
+		return response;
+
+
+	}
+	private SpeechletResponse handleKnownEventWhatTimeIntent(IntentRequest intentReq, Session session) {
+			SpeechletResponse response = null;
+			response = newAskResponse(events[lastRead].getTitle() + " is on: " + events[lastRead].getTime(),false, "What else would you like to know?", false);
+			return response;
+	}
+	private SpeechletResponse handleKnownEventHowMuchIntent(IntentRequest intentReq, Session session) {
+			SpeechletResponse response = null;
+			response = newAskResponse(events[lastRead].getTitle() + " costs: " + events[lastRead].getPrice() + " and up.",false, "What else would you like to know?", false);
+			return response;
+	}
+	private SpeechletResponse handleKnownEventWhatDateIntent(IntentRequest intentReq, Session session) {
+			SpeechletResponse response = null;
+			response = newAskResponse(events[lastRead].getTitle() + " is on: " + events[lastRead].getTime(), false, "What else would you like to know?", false);
+			return response;
+	}
+
+
 }
+
